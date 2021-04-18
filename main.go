@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"strings"
 )
@@ -24,11 +26,50 @@ type Group struct {
 }
 
 type Segment struct {
-	StartColumn                  int // Field Index 0
-	SourcesIndex                 int // Field Index 1
-	OriginalSourceStartingLine   int // Field Index 2
-	OriginalSrouceStartingColumn int // Field Index 3
-	NameIndex                    int // Field Index 4
+	StartColumn               int // Field Index 0
+	SourcesIndex              int // Field Index 1
+	OriginalSourceStartLine   int // Field Index 2
+	OriginalSourceStartColumn int // Field Index 3
+	NameIndex                 int // Field Index 4
+}
+
+func (s *Sourcemap) findOriginalPosition(line int, column int) (Segment, error) {
+	idxLine := -1
+	for i, group := range s.Groups {
+		if group.Line == line {
+			idxLine = i
+			break
+		}
+	}
+
+	if idxLine == -1 {
+		return Segment{}, fmt.Errorf("could not find a mapping for line %d", line)
+	}
+
+	group := s.Groups[idxLine]
+
+	idxColumn := -1
+
+	for i, segment := range group.Segments {
+		if segment.StartColumn >= column {
+			idxColumn = i
+			break
+		}
+	}
+
+	if idxColumn == -1 {
+		return Segment{}, fmt.Errorf("could not find a mapping for column %d", column)
+	}
+
+	return group.Segments[idxColumn], nil
+}
+
+type StacktraceEntry struct {
+	File       string   `json:"file"`
+	MethodName string   `json:"methodName"`
+	Arguments  []string `json:"arguments"`
+	LineNumber int      `json:"lineNumber"`
+	Column     int      `json:"column"`
 }
 
 func main() {
@@ -37,10 +78,33 @@ func main() {
 	sourcemap, err := createSourcemapFromFile(filepath)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse sourcemap from file: %v\n", err)
+		log.Fatalf("Failed to parse sourcemap from file: %v\n", err)
 	}
 
-	fmt.Printf("%s", sourcemap.Mappings)
+	fmt.Printf("%s\n", sourcemap.Mappings)
+
+	// segment, err := sourcemap.findOriginalPosition(3, 0)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	// fmt.Printf("Found original source at %d %d", segment.OriginalSourceStartLine, segment.StartColumn)
+
+	// var stacktraceRaw string
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Enter Stacktrace JSON: ")
+	stacktraceRaw, err := reader.ReadString('\n')
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var stacktrace []StacktraceEntry
+	err = json.Unmarshal([]byte(stacktraceRaw), &stacktrace)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Got stacktrace %v\n", stacktrace)
 }
 
 func createSourcemapFromFile(filepath string) (Sourcemap, error) {
@@ -64,9 +128,16 @@ func createSourcemapFromFile(filepath string) (Sourcemap, error) {
 
 	json.Unmarshal(byteValue, &sourcemap)
 
+	// These previous values do NOT reset. but the previous StartColumn value resets
+	// every line
+	previousSourcesIndex := -1
+	previousOriginalSourceStartLine := -1
+	previousOriginalSourceStartColumn := -1
+	previousNameIndex := -1
+
 	for i, group := range strings.Split(sourcemap.Mappings, ";") {
 		currentGroup := Group{Line: i, Segments: []Segment{}}
-		for _, segment := range strings.Split(group, ",") {
+		for j, segment := range strings.Split(group, ",") {
 			decodedMapping := decodeMapping(segment)
 			// fmt.Printf("Decoded Mapping %s = %v\n", segment)
 			mappingLength := len(decodedMapping)
@@ -75,16 +146,37 @@ func createSourcemapFromFile(filepath string) (Sourcemap, error) {
 				continue
 			}
 
-			currentSegment := Segment{StartColumn: decodedMapping[0]}
+			// If this is the first field of the first segment, or the first segment following a new generated line (“;”),
+			// then this field holds the whole base 64 VLQ. Otherwise, this field contains a base 64 VLQ that is relative to the previous occurrence of this field.
+			// Resets on each line
+			startColumn := decodedMapping[0]
+			if j > 0 {
+				startColumn = startColumn + currentGroup.Segments[0].StartColumn
+			}
+
+			currentSegment := Segment{StartColumn: startColumn}
 
 			if mappingLength >= 4 {
-				currentSegment.SourcesIndex = decodedMapping[1]
-				currentSegment.OriginalSourceStartingLine = decodedMapping[2]
-				currentSegment.OriginalSrouceStartingColumn = decodedMapping[3]
+				// Get Sources Index
+				sourcesIndex := valueWithPrevious(decodedMapping[1], previousSourcesIndex)
+				previousSourcesIndex = sourcesIndex
+				currentSegment.SourcesIndex = sourcesIndex
+
+				// Get original source start line
+				originalSourceStartLine := valueWithPrevious(decodedMapping[2], previousOriginalSourceStartLine)
+				previousOriginalSourceStartLine = originalSourceStartLine
+				currentSegment.OriginalSourceStartLine = originalSourceStartLine
+
+				// Get original source start column
+				originalSourceStartColumn := valueWithPrevious(decodedMapping[3], previousOriginalSourceStartColumn)
+				previousOriginalSourceStartColumn = originalSourceStartColumn
+				currentSegment.OriginalSourceStartColumn = originalSourceStartColumn
 			}
 
 			if mappingLength == 5 {
-				currentSegment.NameIndex = decodedMapping[4]
+				nameIndex := valueWithPrevious(decodedMapping[4], previousNameIndex)
+				previousNameIndex = nameIndex
+				currentSegment.NameIndex = nameIndex
 			}
 
 			currentGroup.Segments = append(currentGroup.Segments, currentSegment)
@@ -94,6 +186,14 @@ func createSourcemapFromFile(filepath string) (Sourcemap, error) {
 	}
 
 	return sourcemap, nil
+}
+
+func valueWithPrevious(value int, previous int) int {
+	if previous == -1 {
+		return value
+	}
+
+	return value + previous
 }
 
 func decodeMapping(mapping string) []int {
