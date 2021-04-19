@@ -12,6 +12,7 @@ import (
 
 type Sourcemap struct {
 	Version        int      `json:"version"`
+	SourceRoot     string   `json:"sourceRoot"`
 	Sources        []string `json:"sources"`
 	Names          []string `json:"names"`
 	File           string   `json:"file"`
@@ -33,7 +34,17 @@ type Segment struct {
 	NameIndex                 int // Field Index 4
 }
 
-func (s *Sourcemap) findOriginalPosition(line int, column int) (Segment, error) {
+func (s *Sourcemap) getFullPath(segment *Segment) string {
+	sourcePath := s.Sources[segment.SourcesIndex]
+
+	if s.SourceRoot == "" {
+		return s.SourceRoot + sourcePath
+	}
+
+	return sourcePath
+}
+
+func (s *Sourcemap) findSegmentFromPosition(line int, column int) (Segment, error) {
 	idxLine := -1
 	for i, group := range s.Groups {
 		if group.Line == line {
@@ -51,10 +62,11 @@ func (s *Sourcemap) findOriginalPosition(line int, column int) (Segment, error) 
 	idxColumn := -1
 
 	for i, segment := range group.Segments {
-		if segment.StartColumn >= column {
-			idxColumn = i
+		if segment.StartColumn > column {
 			break
 		}
+
+		idxColumn = i
 	}
 
 	if idxColumn == -1 {
@@ -62,6 +74,18 @@ func (s *Sourcemap) findOriginalPosition(line int, column int) (Segment, error) 
 	}
 
 	return group.Segments[idxColumn], nil
+}
+
+func (s *Sourcemap) print() {
+	for _, group := range s.Groups {
+		output := fmt.Sprintf("Line #%d: ", group.Line)
+
+		for _, segment := range group.Segments {
+			output += fmt.Sprintf(" | %d => (#%d)[%d, %d]", segment.StartColumn, segment.SourcesIndex, segment.OriginalSourceStartLine, segment.OriginalSourceStartColumn)
+		}
+
+		fmt.Println(output)
+	}
 }
 
 type StacktraceEntry struct {
@@ -81,16 +105,9 @@ func main() {
 		log.Fatalf("Failed to parse sourcemap from file: %v\n", err)
 	}
 
-	fmt.Printf("%s\n", sourcemap.Mappings)
+	// fmt.Printf("%s\n", sourcemap.Mappings)
+	sourcemap.print()
 
-	// segment, err := sourcemap.findOriginalPosition(3, 0)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	// fmt.Printf("Found original source at %d %d", segment.OriginalSourceStartLine, segment.StartColumn)
-
-	// var stacktraceRaw string
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Enter Stacktrace JSON: ")
 	stacktraceRaw, err := reader.ReadString('\n')
@@ -105,6 +122,27 @@ func main() {
 	}
 
 	fmt.Printf("Got stacktrace %v\n", stacktrace)
+
+	for _, entry := range stacktrace {
+		methodName := entry.MethodName
+		file := entry.File
+		line := entry.LineNumber
+		column := entry.Column
+
+		if strings.HasSuffix(entry.File, "main-compiled.js") {
+			segment, err := sourcemap.findSegmentFromPosition(entry.LineNumber, entry.Column)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			file = sourcemap.getFullPath(&segment)
+			line = segment.OriginalSourceStartLine
+			column = segment.OriginalSourceStartColumn
+
+		}
+
+		fmt.Printf("     at %s (%s:%d:%d)\n", methodName, file, line, column)
+	}
 }
 
 func createSourcemapFromFile(filepath string) (Sourcemap, error) {
@@ -131,12 +169,17 @@ func createSourcemapFromFile(filepath string) (Sourcemap, error) {
 	// These previous values do NOT reset. but the previous StartColumn value resets
 	// every line
 	previousSourcesIndex := -1
-	previousOriginalSourceStartLine := -1
-	previousOriginalSourceStartColumn := -1
+
+	// Start previous line and column at 1 so that 1 gets
+	// added initally to the line and column because the VLQ is 0 indexed
+	// but lines and columns are 1 index so we need to bump them up by 1
+	previousOriginalSourceStartLine := 1
+	previousOriginalSourceStartColumn := 1
+
 	previousNameIndex := -1
 
 	for i, group := range strings.Split(sourcemap.Mappings, ";") {
-		currentGroup := Group{Line: i, Segments: []Segment{}}
+		currentGroup := Group{Line: i + 1, Segments: []Segment{}}
 		for j, segment := range strings.Split(group, ",") {
 			decodedMapping := decodeMapping(segment)
 			// fmt.Printf("Decoded Mapping %s = %v\n", segment)
@@ -151,7 +194,7 @@ func createSourcemapFromFile(filepath string) (Sourcemap, error) {
 			// Resets on each line
 			startColumn := decodedMapping[0]
 			if j > 0 {
-				startColumn = startColumn + currentGroup.Segments[0].StartColumn
+				startColumn = startColumn + currentGroup.Segments[j-1].StartColumn
 			}
 
 			currentSegment := Segment{StartColumn: startColumn}
