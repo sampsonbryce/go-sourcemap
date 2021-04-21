@@ -22,6 +22,7 @@ func (s StacktraceEntry) MapToOriginal(sourcemaps *map[string]sourcemap.Sourcema
 		// because filepath will have a `.map` while s.File will not
 		if strings.HasPrefix(filepath, s.File) {
 			segment, err := _sourcemap.FindSegmentFromPosition(s.LineNumber, s.Column)
+			fmt.Printf("Found segment for position %d %d | %v\n", s.LineNumber, s.Column, segment)
 			if err != nil {
 				return StacktraceEntry{}, err
 			}
@@ -41,11 +42,15 @@ func (s StacktraceEntry) MapToOriginal(sourcemaps *map[string]sourcemap.Sourcema
 	return s, nil
 }
 
+func (s *StacktraceEntry) GetTraceText() string {
+	return fmt.Sprintf("at %s (%s:%d:%d)", s.MethodName, s.File, s.LineNumber, s.Column)
+}
+
 func (s *StacktraceEntry) Print() {
 	fmt.Printf("     at %s (%s:%d:%d)\n", s.MethodName, s.File, s.LineNumber, s.Column)
 }
 
-func FromJson(raw string) ([]StacktraceEntry, error) {
+func FromString(raw string) ([]StacktraceEntry, error) {
 	var stacktrace []StacktraceEntry
 	err := json.Unmarshal([]byte(raw), &stacktrace)
 

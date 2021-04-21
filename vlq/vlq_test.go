@@ -23,6 +23,8 @@ func TestDecode(t *testing.T) {
 	toTest["EAAgB"] = []int{2, 0, 0, 16}
 	toTest["mBAAD"] = []int{19, 0, 0, -1}
 	toTest["SAAa"] = []int{9, 0, 0, 13}
+	toTest["oE"] = []int{68}
+	toTest["4mBAEA"] = []int{620, 0, 2, 0}
 
 	for mapping, expected := range toTest {
 

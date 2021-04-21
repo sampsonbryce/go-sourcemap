@@ -93,7 +93,6 @@ func CreateSourcemapFromFile(filepath string) (Sourcemap, error) {
 
 	var sourcemap Sourcemap
 
-	fmt.Printf("Reading sourcemap file at `%s`\n", filepath)
 	file, err := os.Open(filepath)
 
 	if err != nil {

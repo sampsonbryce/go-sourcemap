@@ -1,63 +1,58 @@
 package vlq
 
-import "strings"
+import (
+	"strings"
+)
 
+// Decode takes a base64 VLQ value and converts
+// it into an array of values
+// Heavily insipired by https://github.com/mozilla/source-map
+// and https://github.com/Rich-Harris/vlq
 func Decode(mapping string) []int {
-	// fmt.Printf("Decoding Mapping %s\n", mapping)
-
 	// binary: 100000
-	var VLQ_BASE byte = 1 << 5
+	VLQ_BASE := 1 << 5
 
 	// binary: 011111
-	var VLQ_BASE_MASK byte = VLQ_BASE - 1
+	VLQ_BASE_MASK := VLQ_BASE - 1
 
 	// binary: 100000
-	var VLQ_CONTINUATION_MASK byte = VLQ_BASE
+	VLQ_CONTINUATION_MASK := VLQ_BASE
 
 	// binary: 000001
-	var VLQ_SIGN_MASK byte = 1
+	VLQ_SIGN_MASK := 1
 
 	BASE64 := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 	values := []int{}
 
+	var value int = 0
+	shift := 0
+
 	for i := 0; i < len(mapping); i++ {
-		digit := byte(strings.Index(BASE64, string(mapping[i])))
+		digit := strings.Index(BASE64, string(mapping[i]))
 
-		// fmt.Printf("Decoding Value %s, %08b\n", string(mapping[i]), digit)
+		value |= (digit & int(VLQ_BASE_MASK)) << shift
 
-		// Get value bytes, drop the sign bit
-		var valueBytes byte = (digit & VLQ_BASE_MASK) >> 1
+		continues := digit & int(VLQ_CONTINUATION_MASK)
 
-		var sign byte = (digit & VLQ_SIGN_MASK)
-		// fmt.Printf("Sign %08b\n", sign)
+		if continues > 0 {
+			shift += 5
+		} else {
+			sign := value & VLQ_SIGN_MASK
 
-		continues := digit & VLQ_CONTINUATION_MASK
-		continuedCount := 0
-		for continues > 0 {
-			continuedCount += 1
-			i += 1
-			digit = mapping[i]
+			// Remove sign bit
+			value = value >> 1
 
-			// Get value bytes, minus the sign bit
-			continuedValueBytes := (digit & VLQ_BASE_MASK) >> 1
+			if sign > 0 {
+				value = -value
+			}
 
-			// Append continued value bits onto value bits
-			valueBytes = valueBytes | (continuedValueBytes << (4 * continuedCount))
+			values = append(values, value)
 
-			// Get continuation bit from value
-			continues = digit & VLQ_CONTINUATION_MASK
+			// Reset
+			value = 0
+			shift = 0
 		}
-
-		number := int(valueBytes)
-		if sign > 0 {
-			number = -number
-		}
-
-		// fmt.Printf("Found Bytes: %08b %08b\n", valueBytes, byte(number))
-		// fmt.Printf("Found Number: %d\n", number)
-
-		values = append(values, number)
 	}
 
 	return values
