@@ -126,7 +126,6 @@ func CreateSourcemapFromFile(filepath string) (Sourcemap, error) {
 		currentGroup := Group{Line: i + 1, Segments: []Segment{}}
 		for j, segment := range strings.Split(group, ",") {
 			decodedMapping := vlq.Decode(segment)
-			// fmt.Printf("Decoded Mapping %s = %v\n", segment)
 			mappingLength := len(decodedMapping)
 
 			if mappingLength == 0 {
