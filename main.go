@@ -58,6 +58,8 @@ func main() {
 
 	sourcemaps := sourcemap.FindSourcemaps(filepath, ignore)
 
+	fmt.Println("\n\tReady to collect exceptions. Server listening on 8080..")
+
 	http.HandleFunc("/exception", handleException(&sourcemaps))
 
 	log.Fatal(http.ListenAndServe(":8080", nil))

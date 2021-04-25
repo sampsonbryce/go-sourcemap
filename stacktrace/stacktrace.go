@@ -22,7 +22,6 @@ func (s StacktraceEntry) MapToOriginal(sourcemaps *map[string]sourcemap.Sourcema
 		// because filepath will have a `.map` while s.File will not
 		if strings.HasPrefix(filepath, s.File) {
 			segment, err := _sourcemap.FindSegmentFromPosition(s.LineNumber, s.Column)
-			fmt.Printf("Found segment for position %d %d | %v\n", s.LineNumber, s.Column, segment)
 			if err != nil {
 				return StacktraceEntry{}, err
 			}

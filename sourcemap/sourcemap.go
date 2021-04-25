@@ -3,12 +3,13 @@ package sourcemap
 import (
 	"encoding/json"
 	"fmt"
-	"go-sourcemap/vlq"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sampsonbryce/go-vlq"
 )
 
 type Sourcemap struct {
@@ -190,7 +191,7 @@ func FindSourcemaps(dir string, ignore []string) map[string]Sourcemap {
 					}
 				}
 
-				fmt.Printf("Found map at %s\n", path)
+				fmt.Printf("Parsing map at %s\n", path)
 				_sourcemap, err := CreateSourcemapFromFile(path)
 				if err != nil {
 					return err
